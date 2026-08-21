@@ -5,11 +5,10 @@
 - [x] Data cleaning.
 - [x] Exploratory Data Analysis.
 - [x] Feature Engineering.
-- [x] Train Logistic Regression.
 - [x] Train Random Forest.
-- [x] Train XGBoost/LightGBM.
+- [x] Train XGBoost.
 - [x] Evaluate Precision, Recall, F1, ROC-AUC, PR-AUC.
-- [ ] Chọn baseline production model.
+- [x] Chọn baseline production model.
 
 ## Phase 2 — Anomaly Detection
 
