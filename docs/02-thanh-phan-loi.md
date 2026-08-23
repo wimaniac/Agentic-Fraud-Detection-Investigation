@@ -46,7 +46,6 @@ Mục tiêu:
 Bắt đầu với các baseline model:
 
 ```text
-Logistic Regression
 Random Forest
 XGBoost / LightGBM
 ```

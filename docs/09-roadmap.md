@@ -12,19 +12,19 @@
 
 ## Phase 2 — Anomaly Detection
 
-- [ ] Implement Isolation Forest.
-- [ ] Xây dựng anomaly score.
-- [ ] So sánh supervised model với anomaly model.
-- [ ] Kết hợp anomaly score vào Risk Score.
+- [x] Implement Isolation Forest.
+- [x] Xây dựng anomaly score.
+- [x] So sánh supervised model với anomaly model.
+- [x] Kết hợp anomaly score vào Risk Score.
 
 ## Phase 3 — Rule Engine
 
-- [ ] Transaction velocity.
-- [ ] Device sharing.
-- [ ] IP reputation.
-- [ ] Amount deviation.
-- [ ] Impossible travel.
-- [ ] Xây dựng Rule Score.
+- [x] Transaction velocity.
+- [x] Device sharing.
+- [x] IP reputation.
+- [x] Amount deviation.
+- [x] Impossible travel.
+- [x] Xây dựng Rule Score.
 
 ## Phase 4 — Graph Fraud Detection
 
