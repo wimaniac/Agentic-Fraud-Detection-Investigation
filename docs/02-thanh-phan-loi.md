@@ -1,4 +1,8 @@
 # 02 — Các thành phần lõi: Feature Engine · ML · Anomaly · Rule Engine
+
+> Xem [README.md](./README.md) để có mục lục đầy đủ. **Ghi chú nhỏ đã
+> thêm vào cuối mục 8 (Rule Engine)** — nội dung chính không đổi.
+
 ## 5. Transaction & Feature Engine
 
 Input dự kiến:
@@ -47,12 +51,12 @@ Bắt đầu với các baseline model:
 
 ```text
 Random Forest
-XGBoost / LightGBM
+XGBoost 
 ```
 
 Model đầu tiên nên ưu tiên:
 
-> XGBoost hoặc LightGBM
+> XGBoost
 
 vì phù hợp với dữ liệu dạng tabular và dễ đánh giá feature importance.
 
@@ -69,7 +73,6 @@ F1-score
 ROC-AUC
 PR-AUC
 False Positive Rate
-False Negative Rate
 ```
 
 Đặc biệt chú ý:
@@ -166,11 +169,3 @@ trong khoảng thời gian không hợp lý
 
 Rule Engine không thay thế ML mà cung cấp thêm tín hiệu.
 
----
-
-## Nhận xét / Phân tích
-
-- **Feature Engine** là nền móng của toàn bộ hệ thống — cả ML, Anomaly lẫn Rule Engine đều tiêu thụ cùng một bộ feature. Vì vậy đây nên là thành phần được thiết kế và test kỹ nhất; một sai sót nhỏ ở đây (ví dụ tính sai `transactions_last_5m`) sẽ lan ra toàn bộ hệ thống điểm rủi ro.
-- Danh sách feature có nhiều feature "time-window" (`transactions_last_5m/1h/24h`) — đây là loại feature khó nhất về mặt kỹ thuật vì cần state theo thời gian thực (thường dùng Redis hoặc feature store dạng sliding-window), khác với các feature tĩnh như `account_age`.
-- Việc chọn XGBoost/LightGBM làm baseline là hợp lý cho dữ liệu tabular mất cân bằng — nhưng tài liệu chưa đề cập kỹ thuật xử lý mất cân bằng cụ thể (ví dụ: `scale_pos_weight`, SMOTE, class weighting, hay threshold tuning theo PR-AUC). Đây là điểm nên bổ sung khi vào Phase 1 của roadmap.
-- Rule Engine và ML/Anomaly có vai trò bổ trợ chứ không cạnh tranh — đúng như nguyên tắc "Rule Engine không thay thế ML" đã nêu. Về mặt tổ chức code, nên giữ rule engine dạng config-driven (YAML/JSON) thay vì hard-code, để dễ điều chỉnh threshold N trong Rule 1 mà không cần deploy lại.

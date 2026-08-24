@@ -1,4 +1,8 @@
 # 04 — AI Investigation Agent & Investigation Report
+
+> Xem [README.md](./README.md) để có mục lục đầy đủ. **Ghi chú nhỏ đã
+> thêm ở mục 11 (Agent Tools)** — nội dung chính không đổi.
+
 ## 11. AI Investigation Agent
 
 Đây là phần giúp project thể hiện năng lực **AI Agent Engineer**.
@@ -22,6 +26,18 @@ query_transaction_graph()
 get_similar_transactions()
 check_fraud_rules()
 ```
+
+> **[ĐÃ CẬP NHẬT]** `check_fraud_rules()` **không cần viết mới** —
+> ánh xạ thẳng vào `RuleEngine.get_rule_details()` đã build và kiểm
+> chứng sẵn ở Phase 3 (`rule_engine.py`). Hàm này trả về breakdown theo
+> 5 nhóm luật (velocity/device/ip/amount/impossible_travel), đúng định
+> dạng dữ liệu Agent cần để trích dẫn bằng chứng trong Investigation
+> Report — tiết kiệm đáng kể thời gian Phase 6 vì phần "tính toán" đã
+> xong, chỉ cần bọc thành 1 tool interface cho Agent gọi.
+>
+> Tương tự, `query_transaction_graph()` có thể tái sử dụng trực tiếp các
+> Cypher query đã viết sẵn ở Phase 4 (`docs/cypher_queries.md`, đặc biệt
+> mục 3 — "Tra cứu 1 user cụ thể").
 
 ### LangGraph Workflow
 
@@ -52,6 +68,13 @@ LOW RISK       HIGH RISK
                   ▼
           Investigation Report
 ```
+
+> **Lưu ý nhỏ:** "Read Risk Score" ở đây nên đọc **cả** Risk Score
+> (0-100, từ ML) **lẫn** 2 cờ escalation (`flag_novel_anomaly`,
+> `flag_extreme_rule`) — không chỉ Risk Score đơn thuần. Một giao dịch
+> có Risk Score thấp nhưng cờ escalation bật vẫn nên đi vào nhánh
+> Investigation, theo đúng thiết kế đã cập nhật ở
+> [03-graph-va-risk-score.md](./03-graph-va-risk-score.md) mục 10.
 
 ---
 
@@ -101,11 +124,3 @@ Confidence:
 High
 ```
 
----
-
-## Nhận xét / Phân tích
-
-- Cách thiết kế "LLM không thay thế fraud model, mà điều tra nguyên nhân" là điểm mấu chốt giúp project tránh bẫy phổ biến (dùng LLM như một "black-box oracle" để phán fraud/không fraud) — đây cũng là nội dung được nhấn mạnh lại ở [mục 27 — Nguyên tắc phát triển](./11-portfolio-nguyen-tac-muc-tieu.md).
-- 7 tool liệt kê cho agent đều là các hàm truy vấn dữ liệu (read-only) — điều này an toàn và hợp lý cho một investigation agent, vì agent chỉ cần thu thập bằng chứng chứ không cần quyền ghi/thay đổi dữ liệu giao dịch.
-- Trong sơ đồ LangGraph, node "Risk Analyst" xuất hiện sau khi 3 nhánh (History, Graph, Rules) hội tụ — đây thực chất là bước tổng hợp bằng chứng thành báo cáo. Cần làm rõ node này là một lời gọi LLM riêng (tổng hợp) hay chỉ là bước ghép dữ liệu thuần túy, vì điều này ảnh hưởng đến độ trễ và chi phí gọi model.
-- Investigation Report mẫu có cấu trúc rõ ràng (Summary, Evidence, Recommendation, Confidence) — nên định nghĩa đây thành **structured output schema** (ví dụ Pydantic model) ngay từ đầu để dễ validate và hiển thị lên dashboard, thay vì để LLM sinh free-text.

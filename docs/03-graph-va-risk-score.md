@@ -1,4 +1,10 @@
 # 03 — Graph-based Fraud Detection & Risk Aggregation
+
+> Xem [README.md](./README.md) để có mục lục đầy đủ. **Mục 10 đã được viết
+> lại** dựa trên kết quả kiểm chứng thực nghiệm — xem
+> [01-kien-truc-tong-the.md](./01-kien-truc-tong-the.md) mục "Lịch sử thay
+> đổi" để biết toàn cảnh.
+
 ## 9. Graph-based Fraud Detection
 
 Đây là một trong những phần quan trọng nhất của SentinelAI.
@@ -53,54 +59,111 @@ Neo4j
 
 cho phiên bản production-like.
 
+> **Cập nhật:** Graph pipeline (`graph_analysis.py`,
+> `graph_score.py`, Neo4j ingest) đã được xây dựng đầy đủ ở Phase 4. Tuy
+> nhiên, kết quả Graph **không được dùng như một "Graph Score" độc lập
+> cộng vào Risk Score** như dự kiến ban đầu — xem mục 10 bên dưới để biết
+> lý do và cách Graph thực sự được sử dụng trong hệ thống hiện tại.
+
 ---
 
 ## 10. Risk Aggregation
 
-Không nên quyết định fraud chỉ dựa vào một model.
+> ⚠️ **Phần này đã được viết lại.** Công thức gốc dưới đây từng được đề
+> xuất trong bản thiết kế ban đầu, nhưng đã được **kiểm chứng bằng số
+> liệu thật và không giữ nguyên**:
+>
+> ```text
+> Risk Score = ML Score + Anomaly Score + Rule Score + Graph Score
+> ```
+>
+> Xem phần "Vì sao công thức trên bị thay đổi" ngay dưới đây để hiểu quá
+> trình dẫn đến kiến trúc hiện tại.
 
-Tạo Risk Score tổng hợp:
+### Vì sao công thức trộn 4 nguồn bị thay đổi
+
+Ý tưởng ban đầu (cộng 4 điểm số theo trọng số, ví dụ 40/30/20/10 hoặc bất
+kỳ tỷ lệ minh họa nào) là hợp lý *về mặt trực giác*, nhưng khi đo bằng
+PR-AUC trên dữ liệu thật (1M giao dịch, tách theo thời gian đúng chuẩn),
+kết quả cho thấy:
+
+| Cách kết hợp | PR-AUC | So với ML một mình |
+|---|---|---|
+| Chỉ ML Score | 0.8468 | (baseline) |
+| ML + Anomaly Score (30%) | 0.8126 | **-0.0342** |
+| ML + Rule Score (30%) | 0.8089 | **-0.0379** |
+
+**Cả 2 lần trộn đều làm hệ thống TỆ HƠN**, không tốt hơn như giả định ban
+đầu. Lý do khác nhau cho từng nguồn:
+
+- **Anomaly Score** (Isolation Forest): tín hiệu **độc lập thật** với ML,
+  nhưng **quá yếu** — trong nhóm giao dịch được Anomaly gắn cờ mà ML bỏ
+  sót, chỉ ~2.8-4.5% thực sự là fraud. Phần lớn là nhiễu.
+- **Rule Score**: **không yếu**, nhưng **không độc lập theo đúng nghĩa
+  hữu ích** — nó được tính từ chính những feature thô (`velocity_1h`,
+  `ip_risk_score`...) mà XGBoost đã học cách kết hợp tối ưu. Rule Engine
+  dùng trọng số cố định, đoán tay (0.4/0.3/0.3...) cho cùng loại thông
+  tin đó — về bản chất là "bản sao kém hơn", trộn vào chỉ pha loãng bản
+  gốc đã tốt hơn.
+
+### Kiến trúc Risk Score hiện tại (đã kiểm chứng)
 
 ```text
-Risk Score =
-    ML Score
-  + Anomaly Score
-  + Rule Score
-  + Graph Score
+Risk Score (0-100) = 1.0 × ML Score
+
+Anomaly Score và Rule Score KHÔNG cộng vào công thức trên.
+Thay vào đó, chúng sinh ra 2 CỜ ESCALATION độc lập:
+
+    flag_novel_anomaly()   — True nếu Anomaly Score ≥ ngưỡng cao
+                              (percentile 98 trên tập train, KHÔNG
+                              phải số cố định đoán tay)
+    flag_extreme_rule()    — True nếu Rule Score ≥ ngưỡng cao
+
+Quyết định cuối cùng = Risk Tier (từ Risk Score) 
+                        VÀ/HOẶC ép escalate nếu bất kỳ cờ nào bật lên,
+                        dù Risk Score gốc đang ở tầng LOW/MEDIUM.
 ```
 
-Có thể chuẩn hóa về:
+Cách này giữ được **cả 2 lợi ích**: (1) Risk Score chính vẫn chính xác
+nhất có thể (không bị pha loãng), và (2) không bỏ phí Anomaly/Rule —
+chúng vẫn bắt được nhóm case hiếm mà ML bỏ sót, chỉ là bắt theo cơ chế
+"cờ báo động", không phải "cộng điểm".
+
+### Ngưỡng phân tầng (risk thresholds)
 
 ```text
-0 → 100
-```
-
-Ví dụ:
-
-```text
-0 - 30
+Risk Score < 30
 LOW RISK
 → Automatically Approve
 
-30 - 70
+30 ≤ Risk Score < 70
 MEDIUM RISK
-→ Additional Verification
+→ Additional Verification (OTP/2FA)
 
-70 - 100
+Risk Score ≥ 70
 HIGH RISK
 → AI Investigation + Human Review
+
+BẤT KỂ risk tier nào ở trên: nếu flag_novel_anomaly() hoặc
+flag_extreme_rule() = True → ép escalate lên ít nhất MEDIUM,
+hoặc thẳng lên HIGH tùy mức độ nghiêm trọng của cờ.
 ```
 
-Các threshold cần được benchmark và điều chỉnh dựa trên validation data.
+Ngưỡng 30/70 và ngưỡng percentile 98 cho 2 cờ đều đã được benchmark
+trên tập test 100K giao dịch thật (không phải số minh họa) — xem
+[10-danh-gia-va-demo.md](./10-danh-gia-va-demo.md) để có ví dụ walkthrough
+đầy đủ với số liệu cụ thể.
 
----
+### Vai trò của Graph trong kiến trúc hiện tại
 
-## Nhận xét / Phân tích
+Graph **không có "Graph Score" riêng** trong công thức trên. Thay vào
+đó, thông tin đồ thị (`in_ring`, `account_degree`, `n_shared_types`) đã
+được **Feature Engine (mục 5) nhúng thẳng vào bộ feature của ML Model**
+— nghĩa là Graph vẫn ảnh hưởng đến Risk Score, chỉ là gián tiếp qua
+`ml_prob`, không phải một nhánh cộng điểm độc lập.
 
-- Graph-based detection là phần **khó nhất về mặt kỹ thuật** nhưng cũng là phần tạo giá trị khác biệt lớn nhất, vì fraud ring (nhiều tài khoản chia sẻ chung thiết bị/IP) gần như không thể phát hiện bằng ML tabular đơn lẻ trên từng giao dịch riêng lẻ.
-- Việc dùng NetworkX cho prototype rồi chuyển sang Neo4j cho bản gần production là lộ trình hợp lý, nhưng cần lưu ý: mô hình dữ liệu (schema) nên được thiết kế thống nhất ngay từ đầu (xem thêm [Database Design](./07-database-va-api.md)) để việc chuyển đổi giữa hai công cụ không phải viết lại logic truy vấn.
-- Công thức `Risk Score = ML + Anomaly + Rule + Graph` được trình bày dạng cộng đơn giản; trong thực tế nên làm rõ thêm:
-  - Trọng số (weight) cho từng thành phần — có thể không bằng nhau.
-  - Cách chuẩn hóa từng score con về cùng thang đo trước khi cộng (ví dụ min-max hoặc sigmoid).
-  - Đây là chi tiết kỹ thuật quan trọng nên được thêm vào roadmap Phase 5 khi triển khai thực tế.
-- Threshold 30/70 là điểm khởi đầu hợp lý, nhưng tài liệu đã đúng khi nhấn mạnh cần benchmark trên validation data — với dữ liệu fraud vốn mất cân bằng, threshold cố định dễ gây quá nhiều false positive hoặc bỏ sót fraud nếu không hiệu chỉnh theo phân phối thực tế.
+`graph_score.py` (Phase 4, kỹ thuật leave-one-out chống leakage) vẫn tồn
+tại và có thể tái sử dụng làm cờ escalation thứ 3 (giống Anomaly/Rules)
+nếu sau này muốn — nhưng **cần kiểm chứng bằng số liệu thật trước**,
+theo đúng quy trình đã áp dụng cho Anomaly và Rule, tránh lặp lại giả
+định chưa kiểm chứng.

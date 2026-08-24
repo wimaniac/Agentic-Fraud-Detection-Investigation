@@ -5,14 +5,14 @@
 
 Khác với hệ thống fraud detection chỉ trả về `fraud = true/false`, SentinelAI kết hợp:
 
-- Machine Learning
-- Anomaly Detection
-- Rule-based Detection
-- Graph Analysis
-- AI Agent / Agentic AI
-- Human-in-the-Loop
-- Explainable AI
-- MLOps
+- Machine Learning (Supervised)
+- Anomaly Detection (Unsupervised) - dùng làm cờ escalation riêng biệt
+- Rule-based Detection - dùng làm cờ escalation riêng biệt và giải thích
+- Graph Analysis - tính năng sẵn có trong ML features
+- AI Agent / Agentic AI (phase sắp tới)
+- Human-in-the-Loop (phase sắp tới)
+- Explainable AI (đã có qua Rule Engine)
+- MLOps (phase sắp tới)
 
 Mục tiêu là xây dựng một hệ thống gần với quy trình thực tế:
 
@@ -21,17 +21,12 @@ Giao dịch
    ↓
 Feature Engineering
    ↓
-ML + Anomaly + Rules + Graph
-   ↓
-Risk Score
-   ↓
-┌───────────────┬────────────────────┐
-│ Low Risk      │ High Risk          │
-│               │                    │
-│ Auto Approve  │ AI Investigation   │
-│               │        ↓           │
-│               │ Human Review       │
-└───────────────┴────────────────────┘
+ML Score ──┐
+           ├──→ Risk Score (0-100) ──┐
+Anomaly Score ─┘                     ↓
+Rule Score  ───────────────────────→ Escalation Flags + Explainability ──→ Investigation Agent
+                                                                   ↓
+                                                            Human Review
 ```
 
 ---
@@ -103,11 +98,4 @@ Xây dựng một hệ thống có khả năng:
 10. Cho phép Human Reviewer xác nhận hoặc bác bỏ kết quả.
 11. Lưu feedback để phục vụ cải thiện model.
 
----
 
-## Nhận xét / Phân tích
-
-- Đây là một project **rất tham vọng**: nó không chỉ là một mô hình ML đơn lẻ mà là một hệ thống tích hợp 5 lớp phát hiện (ML, Anomaly, Rule, Graph, Agent) cộng với vòng lặp con người. Về mặt phạm vi, đây gần với sản phẩm cấp doanh nghiệp hơn là một đồ án cá nhân thông thường.
-- Mục tiêu 11 gạch đầu dòng ở mục 3.1 thực chất tương ứng gần như 1-1 với 8-9 phần kiến trúc phía sau — điều này cho thấy tài liệu được viết có hệ thống, nhưng cũng có nghĩa là khối lượng công việc thực thi rất lớn so với một cá nhân làm trong thời gian ngắn.
-- Điểm mạnh nhất về mặt định vị: SentinelAI không dừng ở "phát hiện" mà đi đến "giải thích" và "học lại" — đây chính là điểm khác biệt so với các project fraud-detection phổ biến trên GitHub, và nên được nhấn mạnh khi trình bày dự án.
-- Rủi ro cần lưu ý sớm: với scope lớn thế này, nên xác định ngay từ đầu đâu là "MVP thực sự chạy được" và đâu là phần "nice-to-have" để tránh việc dự án bị dở dang. Phần [Roadmap](./09-roadmap.md) đã có cấu trúc theo phase, có thể dùng làm cơ sở để cắt giảm nếu cần.

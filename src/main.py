@@ -15,17 +15,20 @@ from xgboost import XGBClassifier
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import (
     roc_auc_score, average_precision_score, precision_score,
-    recall_score, f1_score, confusion_matrix,
+    recall_score, f1_score,
 )
 import os
+import subprocess
 # Set console output to UTF-8 for Vietnamese characters on Windows
 if os.name == 'nt':  # Windows
-    os.system('chcp 65001')
+    subprocess.run(['chcp', '65001'], shell=True, capture_output=True)
 
 from src.features.feature_pipeline import extract_features, FEATURE_COLS
 from src.anomaly.isolation_forest_detector import IsolationForestAnomalyDetector
 from src.risk_engine.aggregator import RiskScoreAggregator
 from src.rule_engine.rule_engine import RuleEngine
+# Import Investigation Agent for Phase 6
+from src.investigation import investigate_transaction, InvestigationAgent
 
 # ----------------------------------------------------------------------
 # CẤU HÌNH — sửa ở đây nếu cấu trúc thư mục của bạn khác
@@ -269,6 +272,109 @@ def stage2_infer_and_report():
         print("    ⚠️ Hơn 5% giao dịch bị kẹp ở biên 100 -> nhiều khả năng gây trùng hạng "
               "(tied ranks) hàng loạt, làm biến dạng ROC-AUC/PR-AUC. Cân nhắc bỏ np.clip "
               "khi ĐÁNH GIÁ metric (chỉ clip khi HIỂN THỊ cho người dùng cuối).")
+
+    # --- GIAI ĐOẠN 6: AI INVESTIGATION AGENT ---
+    # Phân tích sâu các giao dịch có nguy cơ cao để tạo báo cáo chi tiết
+    print("\n[5/5] GIAI ĐOẠN 6 — AI INVESTIGATION AGENT (Phase 6)")
+    print("    Phân tích sâu các giao dịch HIGH RISK và MEDIUM RISK...")
+
+    # Khởi tạo Investigation Agent
+    investigation_agent = InvestigationAgent()
+
+    # Danh sách lưu trữ kết quả điều tra
+    investigation_results = []
+
+    # Xác định các giao dịch cần điều tra (HIGH RISK và MEDIUM RISK)
+    high_risk_mask = np.array(tiers) == "HIGH RISK"
+    medium_risk_mask = np.array(tiers) == "MEDIUM RISK"
+    investigate_mask = high_risk_mask | medium_risk_mask  # Điều tra cả HIGH và MEDIUM risk
+
+    if investigate_mask.any():
+        investigate_indices = np.where(investigate_mask)[0]
+        print(f"    Tìm thấy {len(investigate_indices)} giao dịch cần điều tra "
+              f"(HIGH RISK: {high_risk_mask.sum()}, MEDIUM RISK: {medium_risk_mask.sum()})")
+
+        # Giới hạn số lượng giao dịch điều tra để tránh quá tải (ví dụ: tối đa 20 giao dịch)
+        max_investigations = min(20, len(investigate_indices))
+        if len(investigate_indices) > max_investigations:
+            print(f"    Giới hạn điều tra tối đa {max_investigations} giao dịch "
+                  f"(chọn dựa trên risk_score cao nhất)")
+            # Chọn các giao dịch có risk_score cao nhất để điều tra
+            investigate_indices = investigate_indices[np.argsort(-risk_score[investigate_indices])[:max_investigations]]
+
+        # Thực hiện điều tra cho từng giao dịch được chọn
+        for idx in investigate_indices:
+            # Lấy dữ liệu giao dịch từ test_feat
+            transaction_data = test_feat.iloc[idx]
+
+            # Lấy thông tin tài khoản và mạng lưới nếu cần
+            account_id = transaction_data.get('account_id', 'UNKNOWN')
+
+            # Thực hiện điều tra
+            try:
+                investigation_result = investigate_transaction(
+                    transaction_data=transaction_data,
+                    accounts_data=accounts,  # Đã tải ở trên
+                    edges_data=edges         # Đã tải ở trên
+                )
+
+                # Thêm thông tin giao dịch vào kết quả điều tra
+                investigation_result['transaction_index'] = int(idx)
+                investigation_result['original_risk_score'] = float(risk_score[idx])
+                investigation_result['original_tier'] = tiers[idx]
+                investigation_result['ml_prob'] = float(ml_prob[idx])
+
+                investigation_results.append(investigation_result)
+
+                # In tiến độ
+                if len(investigation_results) % 5 == 0:
+                    print(f"    Đã hoàn thành {len(investigation_results)}/{max_investigations} cuộc điều tra...")
+
+            except Exception as e:
+                print(f"    Cảnh báo: Không thể điều tra giao dịch index {idx}: {e}")
+                continue
+
+        print(f"    Hoàn thành {len(investigation_results)} cuộc điều tra chi tiết")
+
+        # Lưu kết quả điều tra
+        if investigation_results:
+            # Tóm tắt các trường hợp điều tra
+            investigation_summary = {
+                'total_investigations': len(investigation_results),
+                'high_risk_investigations': sum(1 for r in investigation_results
+                                              if r.get('investigation_summary', {}).get('risk_tier') == 'HIGH RISK'),
+                'medium_risk_investigations': sum(1 for r in investigation_results
+                                                if r.get('investigation_summary', {}).get('risk_tier') == 'MEDIUM RISK'),
+                'avg_investigation_confidence': np.mean([r.get('confidence_score', 0)
+                                                       for r in investigation_results]) if investigation_results else 0,
+                'investigations': investigation_results
+            }
+
+            # Lưu kết quả điều tra
+            import json
+            import datetime
+            investigation_file = MODEL_DIR / f"investigation_results_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            with open(investigation_file, 'w', encoding='utf-8') as f:
+                json.dump(investigation_summary, f, ensure_ascii=False, indent=2, default=str)
+
+            print(f"    Đã lưu kết quả điều tra chi tiết -> {investigation_file}")
+
+            # Hiển thị tóm tắt một vài trường hợp điều tra nổi bật
+            print(f"\n    TÓM TẮT MỘT SỐ TRƯỜNG HỢP ĐIỀU TRA NỔI BẬT:")
+            for i, inv_result in enumerate(investigation_results[:3]):  # Hiển thị 3 trường hợp đầu tiên
+                tx_id = inv_result.get('transaction_id', f'TX_{inv_result.get("transaction_index", "UNKNOWN")}')
+                action = inv_result.get('recommended_action', 'N/A')
+                confidence = inv_result.get('confidence_score', 0)
+                risk_tier = inv_result.get('investigation_summary', {}).get('risk_tier', 'N/A')
+                print(f"    {i+1}. Giao dịch {tx_id}:")
+                print(f"       - Mức rủi ro gốc: {inv_result.get('original_tier', 'N/A')} "
+                      f"(score: {inv_result.get('original_risk_score', 0):.1f})")
+                print(f"       - Kết luận điều tra: {risk_tier}")
+                print(f"       - Hành động đề xuất: {action}")
+                print(f"       - Mức độ tin cậy: {confidence:.1%}")
+                print()
+    else:
+        print("    Không có giao dịch HIGH RISK hoặc MEDIUM RISK để điều tra.")
 
     result = test_feat[["account_id", LABEL_COL]].copy()
     result["ml_prob"] = ml_prob.round(4)

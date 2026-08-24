@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Module tổng hợp điểm rủi ro (Risk Engine / Score Aggregator)
-Kết hợp ML Score, Anomaly Score, Rule Score và Graph Score thành Risk Score tổng thể (0 - 100).
+Kết hợp ML Score, Anomaly Score và Rule Score thành Risk Score tổng thể (0 - 100).
 """
 
 from typing import Dict, Any, Union
@@ -13,7 +13,7 @@ class RiskScoreAggregator:
     """
     Bộ tổng hợp điểm rủi ro đa nguồn của SentinelAI.
     Công thức:
-        Risk Score = w_ml * ML_Score + w_anom * Anomaly_Score + w_rule * Rule_Score + w_graph * Graph_Score
+        Risk Score = w_ml * ML_Score + w_anom * Anomaly_Score + w_rule * Rule_Score
     """
 
     def __init__(
@@ -21,7 +21,6 @@ class RiskScoreAggregator:
         weight_ml: float = 1.00,
         weight_anomaly: float = 0.00,
         weight_rule: float = 0.00,
-        weight_graph: float = 0.00,
         anomaly_threshold: float = 70.0
     ):
         """
@@ -37,32 +36,29 @@ class RiskScoreAggregator:
 
         Anomaly Score VẪN CÓ GIÁ TRỊ — nhưng nên dùng qua `flag_novel_anomaly()`
         (cờ escalation riêng biệt, xem bên dưới) thay vì cộng thẳng vào
-        Risk Score chính. Nếu sau này có Rule Score/Graph Score được kiểm
+        Risk Score chính. Nếu sau này có Rule Score được kiểm
         chứng thực sự cải thiện PR-AUC, hãy set weight tương ứng > 0 dựa
         trên bằng chứng, đừng dùng số minh họa trong tài liệu thiết kế ban đầu.
 
         anomaly_threshold: ngưỡng (0-100) để xác định anomaly mới (novel) kích hoạt cờ.
         """
-        total_w = weight_ml + weight_anomaly + weight_rule + weight_graph
+        total_w = weight_ml + weight_anomaly + weight_rule
         if not np.isclose(total_w, 1.0):
             # Tự động chuẩn hóa tổng trọng số về 1.0
             weight_ml /= total_w
             weight_anomaly /= total_w
             weight_rule /= total_w
-            weight_graph /= total_w
 
         self.w_ml = weight_ml
         self.w_anom = weight_anomaly
         self.w_rule = weight_rule
-        self.w_graph = weight_graph
         self.anomaly_threshold = anomaly_threshold
 
     def calculate_risk_score(
         self,
         ml_prob: Union[float, np.ndarray, pd.Series],
         anomaly_score: Union[float, np.ndarray, pd.Series],
-        rule_score: Union[float, np.ndarray, pd.Series] = 0.0,
-        graph_score: Union[float, np.ndarray, pd.Series] = 0.0
+        rule_score: Union[float, np.ndarray, pd.Series] = 0.0
     ) -> Union[float, np.ndarray, pd.Series]:
         """
         Tính toán điểm Risk Score từ 0 đến 100.
@@ -71,13 +67,12 @@ class RiskScoreAggregator:
             ml_prob: Xác suất gian lận từ mô hình Supervised, BẮT BUỘC trong [0.0, 1.0].
             anomaly_score: Điểm dị biệt từ Anomaly Detector, BẮT BUỘC trong [0.0, 100.0].
             rule_score: Điểm vi phạm từ Rule Engine (0.0 - 100.0).
-            graph_score: Điểm rủi ro từ Graph Engine (0.0 - 100.0).
 
         Returns:
             Risk Score trong khoảng [0, 100].
 
         Raises:
-            ValueError: nếu ml_prob hoặc anomaly_score nằm ngoài thang đo quy ước.
+            ValueError: nếu ml_prob hoặc anomaly_score nằm ngoài thang đo quy estimés.
 
         Lưu ý thiết kế: bản trước dùng heuristic `np.max(x) <= 1.0` để TỰ ĐOÁN xem input
         đang ở thang 0-1 hay 0-100. Đây là cách làm RỦI RO: một mảng anomaly_score toàn
@@ -107,8 +102,7 @@ class RiskScoreAggregator:
         risk = (
             self.w_ml * ml_score_100 +
             self.w_anom * anom_arr +
-            self.w_rule * rule_score +
-            self.w_graph * graph_score
+            self.w_rule * rule_score
         )
         return np.clip(risk, 0.0, 100.0)
 
