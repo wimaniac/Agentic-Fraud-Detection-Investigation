@@ -13,6 +13,16 @@ Thay vào đó:
 
 > ML phát hiện rủi ro → Agent điều tra nguyên nhân.
 
+### Phân định trách nhiệm deterministic và LLM
+
+- Risk Score, risk tier, escalation và action là **deterministic**: XGBoost,
+  Risk Engine và policy code quyết định; LLM không được thay thế hoặc sửa các kết quả này.
+- Bảy tool điều tra (rule, graph, user/device/IP history, transaction history,
+  similar case) luôn chạy theo workflow cố định; chúng không do LLM chọn hay gọi.
+- LLM (DeepSeek) chỉ chạy ở bước cuối để chuyển evidence JSON đã hoàn tất thành
+  Investigation Report dễ đọc cho Human Reviewer. Nếu LLM lỗi, hệ thống giữ report
+  template deterministic và không làm thay đổi quyết định.
+
 ### Agent Tools
 
 Agent có thể sử dụng:

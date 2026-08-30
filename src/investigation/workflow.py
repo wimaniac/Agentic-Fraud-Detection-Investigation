@@ -6,6 +6,7 @@ import pandas as pd
 import os
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+from dotenv import load_dotenv
 
 # Try to import langgraph, fall back to simple implementation if not available
 try:
@@ -68,7 +69,8 @@ class InvestigationWorkflow:
             data_dir: Directory containing processed data
         """
         self.data_dir = data_dir
-        self.llm_agent = None
+        self.report_generator = None
+        load_dotenv()
 
         # Initialize all tools
         self.graph_tool = GraphQueryTool(data_dir)
@@ -81,12 +83,13 @@ class InvestigationWorkflow:
 
         # DeepSeek is optional at runtime so local/offline investigation remains
         # usable. Set DEEPSEEK_API_KEY (and optionally DEEPSEEK_MODEL) to enable it.
+        # A key is a credential, not an instruction to make paid network calls.
+        # Enable report generation explicitly with ``llm_model`` or
+        # DEEPSEEK_MODEL=deepseek-v4-flash.
         selected_model = llm_model or os.getenv("DEEPSEEK_MODEL")
-        if selected_model is None and os.getenv("DEEPSEEK_API_KEY"):
-            selected_model = "deepseek-v4-flash"
         if selected_model:
-            from .llm_agent import DeepSeekInvestigationAgent
-            self.llm_agent = DeepSeekInvestigationAgent(self, selected_model)
+            from .llm_agent import DeepSeekReportGenerator
+            self.report_generator = DeepSeekReportGenerator(selected_model)
 
         # Build workflow if langgraph is available
         if LANGGRAPH_AVAILABLE:
@@ -114,6 +117,7 @@ class InvestigationWorkflow:
         workflow.add_node("similar_cases", self._similar_cases_step)
         workflow.add_node("synthesis", self._synthesis_step)
         workflow.add_node("recommendation", self._recommendation_step)
+        workflow.add_node("llm_report", self._llm_report_step)
 
         # Set entry point
         workflow.set_entry_point("risk_assessment")
@@ -128,7 +132,8 @@ class InvestigationWorkflow:
         workflow.add_edge("ip_history", "similar_cases")
         workflow.add_edge("similar_cases", "synthesis")
         workflow.add_edge("synthesis", "recommendation")
-        workflow.add_edge("recommendation", END)
+        workflow.add_edge("recommendation", "llm_report")
+        workflow.add_edge("llm_report", END)
 
         # Compile the workflow
         return workflow.compile()
@@ -156,8 +161,6 @@ class InvestigationWorkflow:
         state.edges_data = edges_data
         state.investigation_timestamp = datetime.now().isoformat()
 
-        if self.llm_agent is not None:
-            return self._llm_investigation(state)
         if LANGGRAPH_AVAILABLE and self.workflow:
             # Use LangGraph workflow
             try:
@@ -176,19 +179,6 @@ class InvestigationWorkflow:
         else:
             # Use sequential workflow
             return self._sequential_investigation(state)
-
-    def _llm_investigation(self, state: InvestigationState) -> Dict[str, Any]:
-        """Run LLM-selected evidence collection around deterministic scoring."""
-        state = self._risk_assessment_step(state)
-        if "error" in state.risk_scores:
-            return self._state_to_dict(state)
-        try:
-            state = self.llm_agent.investigate(state)
-        except Exception as error:
-            state.errors.append(f"DeepSeek investigation failed: {error}")
-        state = self._synthesis_step(state)
-        state = self._recommendation_step(state)
-        return self._state_to_dict(state)
 
     def _sequential_investigation(self, initial_state: InvestigationState) -> Dict[str, Any]:
         """
@@ -214,6 +204,7 @@ class InvestigationWorkflow:
             state = self._similar_cases_step(state)
             state = self._synthesis_step(state)
             state = self._recommendation_step(state)
+            state = self._llm_report_step(state)
 
             return self._state_to_dict(state)
         except Exception as e:
@@ -290,10 +281,16 @@ class InvestigationWorkflow:
                         rule_score=0.0,
                     )
                     risk_score_value = float(risk_score[0])
+                    # Explain the already-computed model input. TreeSHAP is
+                    # evidence only: it neither recalculates the probability
+                    # nor changes the ML-only risk score/policy path.
+                    from src.explainability import ModelExplainer
+                    model_explanation = ModelExplainer().explain(cal_xgb, X_features)
 
                     state.risk_scores = {
                         "ml_risk_score": risk_score_value if len(risk_score) == 1 else risk_score.tolist(),
                         "risk_tier": self._get_risk_tier(risk_score_value),
+                        "model_explanation": model_explanation,
                         "components": {
                             # Try to get component contributions if available
                             # For now, we'll use placeholder values
@@ -492,7 +489,7 @@ class InvestigationWorkflow:
             state.current_step = "synthesis"
             llm_metadata = {
                 key: state.investigation_summary[key]
-                for key in ("llm_narrative", "llm_model", "llm_tool_calls")
+                for key in ("llm_narrative", "llm_model", "llm_provider")
                 if key in state.investigation_summary
             }
 
@@ -522,6 +519,8 @@ class InvestigationWorkflow:
                 "similar_fraud_cases": similar_cases_fraud_rate >= 0.7,
                 "fraud_ring": bool(state.graph_analysis.get("fraud_ring", {}).get("in_fraud_ring", False)),
             }
+            from src.explainability import GraphEvidenceExtractor
+            graph_evidence = GraphEvidenceExtractor().extract(state.graph_analysis)
 
             state.investigation_summary = {
                 "composite_risk_score": composite_score,
@@ -531,6 +530,8 @@ class InvestigationWorkflow:
                 "risk_tier": self._get_risk_tier(composite_score),
                 "escalation_flags": escalation_flags,
                 "investigation_evidence": investigation_evidence,
+                "model_explanation": state.risk_scores.get("model_explanation"),
+                "graph_evidence": graph_evidence,
                 "key_findings": {
                     "high_risk_factors": self._identify_high_risk_factors(state),
                     "risk_mitigating_factors": self._identify_risk_mitigating_factors(state),
@@ -582,7 +583,7 @@ class InvestigationWorkflow:
                 "action": recommended_action,
                 "action_code": action_code,
                 "confidence_score": confidence,
-                "reasoning": state.investigation_summary.get("llm_narrative") or self._generate_reasoning(state)
+                "reasoning": self._generate_reasoning(state)
             }
 
         except Exception as e:
@@ -590,6 +591,20 @@ class InvestigationWorkflow:
             state.recommended_action = "ERROR - REQUIRES MANUAL REVIEW"
             state.confidence_score = 0.1
 
+        return state
+
+    def _llm_report_step(self, state: InvestigationState) -> InvestigationState:
+        """Use DeepSeek only to phrase a completed deterministic investigation."""
+        if self.report_generator is None:
+            return state
+        try:
+            report = self.report_generator.generate_report(state)
+            state.investigation_summary["llm_narrative"] = report
+            state.investigation_summary["llm_model"] = self.report_generator.model
+            state.investigation_summary["llm_provider"] = "deepseek"
+            state.investigation_summary["final_recommendation"]["reasoning"] = report
+        except Exception as error:
+            state.errors.append(f"DeepSeek report generation failed: {error}")
         return state
 
     def _get_risk_tier(self, score: float) -> str:

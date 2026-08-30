@@ -45,6 +45,28 @@ Mục tiêu là xây dựng một:
 
 > Closed-loop AI system
 
+### Triển khai Phase 7
+
+Human Review UI được xây dựng bằng Streamlit (`streamlit_app.py`). Reviewer nhập
+`transaction_id`, chạy investigation deterministic, sau đó chọn một trong ba
+quyết định: `CONFIRM_FRAUD`, `FALSE_POSITIVE`, hoặc
+`NEED_MORE_INFORMATION`.
+
+Feedback được ghi append-only vào SQLite local
+`data/feedback/human_feedback.sqlite` qua `HumanFeedbackRepository`. Mỗi record
+lưu transaction ID, reviewer ID, decision, ghi chú, snapshot investigation và
+timestamp UTC. Lưu append-only giúp audit được cả lượt review; không ghi đè
+quyết định cũ.
+
+Nút export tạo feedback dataset cho retraining. Chính sách nhãn:
+
+- `CONFIRM_FRAUD` → `review_fraud_label = 1`;
+- `FALSE_POSITIVE` → `review_fraud_label = 0`;
+- `NEED_MORE_INFORMATION` không đưa vào retraining (`ready_for_retraining = false`).
+
+UI không hiển thị `is_fraud` gốc của dataset cho reviewer, để tránh leakage
+ground truth và giữ đúng ý nghĩa human review.
+
 ---
 
 ## 14. Explainable AI
@@ -80,14 +102,28 @@ Why?
    (Graph/ML feature: account_degree = 15)
 ```
 
-Có thể nghiên cứu thêm:
+### Triển khai Phase 8
 
-```text
-SHAP
-Feature Importance
-Rule Evidence (đã có qua RuleEngine.get_rule_details())
-Graph Evidence
-```
+Mỗi investigation đưa thêm evidence có cấu trúc vào `investigation_summary`:
+
+- **Native TreeSHAP**: `ModelExplainer` gọi `XGBoost.predict(...,
+  pred_contribs=True)` để cho biết feature nào đẩy raw margin của model nền lên
+  hoặc xuống. Đây không phải score mới, không tính lại calibrated probability,
+  và không sửa Risk Score/tier/policy.
+- **Feature importance**: tái sử dụng `feature_importances_` của fitted
+  `XGBClassifier` để hiển thị top global features, tách biệt với local TreeSHAP.
+- **Rule evidence**: `RuleEngine.get_rule_details()` từ Phase 3.
+- **Graph evidence**: `GraphEvidenceExtractor` chuẩn hoá structural evidence
+  (neighbors, centrality, component) và gắn cờ rõ ràng cho evidence dựa nhãn
+  lịch sử (fraud ring). Tất cả là investigation/human-review evidence, không
+  phải online ML feature hay policy input.
+- **AI-generated explanation**: nếu DeepSeek được opt-in, nó chỉ viết lại JSON
+  evidence đã hoàn tất thành báo cáo cho reviewer; không được suy luận thêm,
+  tính điểm hoặc thay đổi quyết định deterministic.
+
+Streamlit UI hiển thị local drivers, global importance và graph evidence. Nếu
+TreeSHAP không thể đọc fitted model, investigation vẫn chạy và báo rõ evidence
+không khả dụng thay vì tự tạo giải thích.
 
 Mục tiêu:
 

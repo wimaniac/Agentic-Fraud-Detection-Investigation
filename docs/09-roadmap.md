@@ -76,33 +76,33 @@
 
 ## Phase 6 — AI Investigation Agent
 
-- [ ] Thiết kế LangGraph workflow.
-- [ ] User History Tool.
-- [ ] Transaction History Tool.
-- [ ] Device History Tool.
-- [ ] IP History Tool.
-- [ ] Graph Query Tool. *(có thể tái dùng Neo4j đã build ở Phase 4)*
-- [ ] Rule Analysis Tool. *(dùng `RuleEngine.get_rule_details()` đã có sẵn — không cần viết lại)*
-- [ ] Similar Case Tool.
-- [ ] Investigation Agent.
-- [ ] Structured Investigation Report.
+- [x] Thiết kế LangGraph workflow.
+- [x] User History Tool.
+- [x] Transaction History Tool.
+- [x] Device History Tool.
+- [x] IP History Tool.
+- [x] Graph Query Tool. *(có thể tái dùng Neo4j đã build ở Phase 4)*
+- [x] Rule Analysis Tool. *(dùng `RuleEngine.get_rule_details()` đã có sẵn — không cần viết lại)*
+- [x] Similar Case Tool.
+- [x] Investigation Agent.
+- [x] Structured Investigation Report.
 
 ## Phase 7 — Human-in-the-Loop
 
-- [ ] Human Review UI.
-- [ ] Confirm Fraud.
-- [ ] False Positive.
-- [ ] Need More Information.
-- [ ] Lưu feedback.
-- [ ] Chuẩn bị feedback dataset.
+- [x] Human Review UI (Streamlit).
+- [x] Confirm Fraud.
+- [x] False Positive.
+- [x] Need More Information.
+- [x] Lưu feedback (append-only SQLite adapter).
+- [x] Chuẩn bị feedback dataset/export cho retraining.
 
 ## Phase 8 — Explainability
 
-- [ ] SHAP.
-- [ ] Feature importance. *(đã có sẵn từ Phase 1, tái sử dụng)*
+- [x] SHAP. *(native TreeSHAP của XGBoost qua `pred_contribs`; không thêm dependency)*
+- [x] Feature importance. *(tái sử dụng `feature_importances_` của XGBoost)*
 - [x] Rule evidence. *(`get_rule_details()` đã làm xong ở Phase 3)*
-- [ ] Graph evidence.
-- [ ] AI-generated explanation.
+- [x] Graph evidence. *(structural + historical-label provenance, investigation-only)*
+- [x] AI-generated explanation. *(DeepSeek chỉ diễn đạt deterministic evidence khi opt-in)*
 
 ## Phase 9 — Productionization
 
