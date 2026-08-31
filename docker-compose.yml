@@ -1,0 +1,115 @@
+services:
+  api:
+    build: .
+    command: uv run uvicorn src.api.app:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:-sentinel_local_only}@postgres:5432/${POSTGRES_DB:-sentinelai}
+      REDIS_URL: redis://redis:6379/0
+      SENTINEL_API_KEY: ${SENTINEL_API_KEY:?Set SENTINEL_API_KEY in .env}
+      APP_ENV: production
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_SOURCE: ${MODEL_SOURCE:-local}
+      MLFLOW_MODEL_NAME: ${MLFLOW_MODEL_NAME:-SentinelAI-Fraud-Detector}
+      MLFLOW_MODEL_ALIAS: ${MLFLOW_MODEL_ALIAS:-champion}
+    volumes:
+      - ./data:/app/data:ro
+      - ./models:/app/models:ro
+      - mlflow_artifacts:/mlartifacts:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+
+  dashboard:
+    build: .
+    command: uv run streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:-sentinel_local_only}@postgres:5432/${POSTGRES_DB:-sentinelai}
+      APP_ENV: production
+    volumes:
+      - ./data:/app/data:ro
+      - ./models:/app/models:ro
+    ports:
+      - "8501:8501"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sentinelai}
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel_local_only}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/sentinel_local_only}
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+
+  mlflow:
+    build: .
+    command: >
+      uv run mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri postgresql+psycopg://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:-sentinel_local_only}@postgres:5432/${POSTGRES_DB:-sentinelai}
+      --artifacts-destination /mlartifacts
+    environment:
+      MLFLOW_SERVER_ALLOWED_HOSTS: "*"
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_artifacts:/mlartifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v3.10.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
+  neo4j_data:
+  mlflow_artifacts:
+  prometheus_data:

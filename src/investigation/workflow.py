@@ -241,70 +241,63 @@ class InvestigationWorkflow:
                 if column in tx_df.columns:
                     tx_df[column] = pd.to_numeric(tx_df[column], errors="raise")
 
-            # Load models and artifacts (in production these would be cached)
-            model_dir = Path("models")
-            if model_dir.exists():
-                # Load pre-trained models for feature extraction and ML prediction
-                try:
-                    # Load the calibrated XGBoost model and scaler/artifacts
-                    import joblib
-                    from src.features.feature_pipeline import extract_features, FEATURE_COLS
+            # Resolve one explicit deployment source. In production this can be
+            # the MLflow champion alias; it never silently falls back to another model.
+            try:
+                from src.features.feature_pipeline import extract_features, FEATURE_COLS
+                from src.serving import load_production_bundle
 
-                    # Load artifacts
-                    cal_xgb = joblib.load(model_dir / "xgb_calibrated.pkl")
-                    acc_stats_train = joblib.load(model_dir / "acc_stats_train.pkl")
-                    train_median = joblib.load(model_dir / "train_median.pkl")
+                bundle = load_production_bundle()
+                cal_xgb = bundle.calibrated_model
+                acc_stats_train = bundle.acc_stats_train
+                train_median = bundle.train_median
 
-                    # Extract features using the pipeline (infer mode)
-                    features_df, _, _ = extract_features(
-                        tx_df,
-                        edges=pd.read_parquet(model_dir / "_edges_ref.parquet") if (model_dir / "_edges_ref.parquet").exists() else None,
-                        accounts=pd.read_parquet(model_dir / "_accounts_ref.parquet") if (model_dir / "_accounts_ref.parquet").exists() else None,
-                        acc_stats_train=acc_stats_train,
-                        train_median=train_median,
-                        mode="infer"
-                    )
-                    X_features = features_df[FEATURE_COLS].apply(pd.to_numeric, errors="raise")
+                # Extract features using the pipeline (infer mode)
+                features_df, _, _ = extract_features(
+                    tx_df,
+                    edges=bundle.edges,
+                    accounts=bundle.accounts,
+                    acc_stats_train=acc_stats_train,
+                    train_median=train_median,
+                    mode="infer"
+                )
+                X_features = features_df[FEATURE_COLS].apply(pd.to_numeric, errors="raise")
 
-                    # Get ML probability from the calibrated model
-                    probabilities = cal_xgb.predict_proba(X_features)
-                    classes = list(cal_xgb.classes_)
-                    if 1 not in classes:
-                        raise ValueError("Calibrated model has no fraud class (label 1)")
-                    ml_prob = probabilities[:, classes.index(1)]
+                # Get ML probability from the calibrated model
+                probabilities = cal_xgb.predict_proba(X_features)
+                classes = list(cal_xgb.classes_)
+                if 1 not in classes:
+                    raise ValueError("Calibrated model has no fraud class (label 1)")
+                ml_prob = probabilities[:, classes.index(1)]
 
-                    # Phase 5 validated ML-only aggregation. Rule/anomaly
-                    # results remain independent escalation signals/evidence.
-                    risk_score = RiskScoreAggregator().calculate_risk_score(
-                        ml_prob=ml_prob,
-                        anomaly_score=0.0,
-                        rule_score=0.0,
-                    )
-                    risk_score_value = float(risk_score[0])
-                    # Explain the already-computed model input. TreeSHAP is
-                    # evidence only: it neither recalculates the probability
-                    # nor changes the ML-only risk score/policy path.
-                    from src.explainability import ModelExplainer
-                    model_explanation = ModelExplainer().explain(cal_xgb, X_features)
+                # Phase 5 validated ML-only aggregation. Rule/anomaly
+                # results remain independent escalation signals/evidence.
+                risk_score = RiskScoreAggregator().calculate_risk_score(
+                    ml_prob=ml_prob,
+                    anomaly_score=0.0,
+                    rule_score=0.0,
+                )
+                risk_score_value = float(risk_score[0])
+                # Explain the already-computed model input. TreeSHAP is
+                # evidence only: it neither recalculates the probability
+                # nor changes the ML-only risk score/policy path.
+                from src.explainability import ModelExplainer
+                model_explanation = ModelExplainer().explain(cal_xgb, X_features)
 
-                    state.risk_scores = {
-                        "ml_risk_score": risk_score_value if len(risk_score) == 1 else risk_score.tolist(),
-                        "risk_tier": self._get_risk_tier(risk_score_value),
-                        "model_explanation": model_explanation,
-                        "components": {
-                            # Try to get component contributions if available
-                            # For now, we'll use placeholder values
-                            "amount_contribution": 0.0,
-                            "velocity_contribution": 0.0,
-                            "ip_contribution": 0.0
-                        }
-                    }
-                except Exception as model_error:
-                    raise RuntimeError(
-                        f"Unable to score transaction with the calibrated XGBoost model: {model_error}"
-                    ) from model_error
-            else:
-                raise FileNotFoundError("Calibrated model artifacts directory 'models' was not found")
+                state.risk_scores = {
+                    "ml_risk_score": risk_score_value if len(risk_score) == 1 else risk_score.tolist(),
+                    "risk_tier": self._get_risk_tier(risk_score_value),
+                    "model_explanation": model_explanation,
+                    "components": {
+                        "amount_contribution": 0.0,
+                        "velocity_contribution": 0.0,
+                        "ip_contribution": 0.0,
+                    },
+                }
+            except Exception as model_error:
+                raise RuntimeError(
+                    f"Unable to score transaction with the configured production model: {model_error}"
+                ) from model_error
 
         except Exception as e:
             state.errors.append(f"Error in risk assessment step: {str(e)}")

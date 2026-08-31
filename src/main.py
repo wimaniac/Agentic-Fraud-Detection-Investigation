@@ -151,6 +151,20 @@ def stage1_train():
     edges.to_parquet(MODEL_DIR / "_edges_ref.parquet")
     accounts.to_parquet(MODEL_DIR / "_accounts_ref.parquet")
 
+    # Tracking is optional and best-effort; persisted artifacts above remain
+    # authoritative when MLflow is unavailable.
+    from src.observability import MlflowTracker
+    MlflowTracker().log_run(
+        run_name="xgboost_calibrated_training",
+        params={
+            "model": "XGBClassifier", "n_estimators": xgb.n_estimators,
+            "max_depth": xgb.max_depth, "learning_rate": xgb.learning_rate,
+            "train_rows": len(X_train), "calibration_rows": len(X_calib),
+        },
+        metrics={"train_fraud_rate": float(y_train.mean())},
+        artifacts=[MODEL_DIR / "xgb_calibrated.pkl", MODEL_DIR / "train_median.pkl"],
+    )
+
     print(f"\nĐã lưu đầy đủ artifact vào {MODEL_DIR}/")
 
 
@@ -391,6 +405,13 @@ def stage2_infer_and_report():
     print(tier_summary.to_string())
 
     result.to_parquet(MODEL_DIR / "scored_test_results.parquet")
+    from src.observability import MlflowTracker
+    MlflowTracker().log_run(
+        run_name="holdout_evaluation",
+        params={"risk_score_formula": "calibrated_ml_only", "test_rows": len(X_test)},
+        metrics={"roc_auc": roc_auc, "pr_auc": pr_auc, "risk_roc_auc": roc_auc_risk, "risk_pr_auc": pr_auc_risk},
+        artifacts=[MODEL_DIR / "scored_test_results.parquet"],
+    )
     print(f"\nĐã lưu kết quả chấm điểm chi tiết -> {MODEL_DIR / 'scored_test_results.parquet'}")
 
     return result

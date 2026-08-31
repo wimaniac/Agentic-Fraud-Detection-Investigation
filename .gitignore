@@ -8,3 +8,5 @@ __pycache__/
 .env
 atlas-map.md
 AGENTs.md
+docs/
+notebook/

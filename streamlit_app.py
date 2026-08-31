@@ -1,9 +1,11 @@
-"""Phase 7 Streamlit human-review UI."""
+"""Human-review UI with local SQLite or production PostgreSQL persistence."""
+import os
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
+from src.database import Database, InvestigationRepository, SqlFeedbackRepository
 from src.human_review import FeedbackDecision, HumanFeedbackRepository
 from src.investigation import InvestigationAgent
 
@@ -20,8 +22,23 @@ def load_transactions() -> pd.DataFrame:
 
 
 @st.cache_resource
-def get_repository() -> HumanFeedbackRepository:
-    return HumanFeedbackRepository(PROJECT_ROOT / "data" / "feedback" / "human_feedback.sqlite")
+def get_repository() -> HumanFeedbackRepository | SqlFeedbackRepository:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        return HumanFeedbackRepository(PROJECT_ROOT / "data" / "feedback" / "human_feedback.sqlite")
+    database = Database(database_url)
+    database.create_schema()
+    return SqlFeedbackRepository(database)
+
+
+@st.cache_resource
+def get_investigation_repository() -> InvestigationRepository | None:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        return None
+    database = Database(database_url)
+    database.create_schema()
+    return InvestigationRepository(database)
 
 
 @st.cache_resource
@@ -54,7 +71,12 @@ if run_investigation:
         st.error("Không tìm thấy transaction ID.")
     else:
         with st.spinner("Đang chạy risk scoring và 7 investigation tools..."):
-            st.session_state.investigation_result = get_agent().investigate_transaction(matches.iloc[0])
+            result = get_agent().investigate_transaction(matches.iloc[0])
+            investigation_repository = get_investigation_repository()
+            if investigation_repository is not None:
+                persisted = investigation_repository.record(result)
+                result["investigation_id"] = persisted["investigation_id"]
+            st.session_state.investigation_result = result
             st.session_state.reviewed_transaction_id = transaction_id.strip()
 
 result = st.session_state.investigation_result
@@ -116,13 +138,16 @@ else:
         submitted = st.form_submit_button("Save feedback", type="primary", icon=":material/save:")
     if submitted:
         try:
-            record = repository.record_feedback(
-                transaction_id=st.session_state.reviewed_transaction_id,
-                reviewer_id=reviewer_id,
-                decision=decision,
-                notes=notes,
-                investigation_snapshot=result,
-            )
+            feedback_args = {
+                "transaction_id": st.session_state.reviewed_transaction_id,
+                "reviewer_id": reviewer_id,
+                "decision": decision,
+                "notes": notes,
+                "investigation_snapshot": result,
+            }
+            if isinstance(repository, SqlFeedbackRepository):
+                feedback_args["investigation_id"] = result["investigation_id"]
+            record = repository.record_feedback(**feedback_args)
             st.success(f"Saved feedback {record['feedback_id']}")
             st.session_state.investigation_result = None
         except (TypeError, ValueError) as error:

@@ -107,20 +107,21 @@
 ## Phase 9 — Productionization
 
 - [x] Cấu trúc package `src/` (features, anomaly, risk_engine, rule_engine).
-- [ ] FastAPI.
+- [x] FastAPI. *(health, investigation, risk, graph evidence và feedback API)*
 - [x] Feature pipeline dùng chung train/infer (`mode="train"/"infer"`,
       chặn leakage khi thiếu artifact).
-- [ ] PostgreSQL.
-- [ ] Redis.
+- [x] PostgreSQL. *(SQLAlchemy + psycopg, immutable investigation snapshots và append-only feedback)*
+- [x] Redis. *(optional fail-open cache cho risk/network và idempotency key; không phải audit/score store)*
 - [x] Neo4j (đã setup ở Phase 4).
-- [ ] GPT.
-- [ ] Streamlit.
-- [ ] Docker Compose .
-- [ ] MLflow.
+- [x] GPT. *(DeepSeek chỉ viết evidence-grounded report khi opt-in)*
+- [x] Streamlit. *(Human Review UI dùng SQLite local hoặc PostgreSQL khi có `DATABASE_URL`)*
+- [x] Docker Compose. *(API, dashboard, PostgreSQL, Redis, Neo4j)*
+- [x] MLflow. *(best-effort tracking cho train/evaluation; server + artifact volume trong Compose)*
+- [x] Production-feedback retraining lifecycle. *(append-only transaction intake, eligibility gate, chronological candidate evaluation, challenger/champion registry aliases)*
 - [x] Unit tests cho feature pipeline, adapter, calibration logic.
-- [ ] Integration tests.
-- [ ] Logging.
-- [ ] Monitoring.
+- [x] Integration tests. *(FastAPI + SQL adapter qua SQLite in-memory; Docker service validation phụ thuộc quyền Docker host)*
+- [x] Logging. *(PII-safe structured JSON request logs với correlation ID)*
+- [x] Monitoring. *(Prometheus HTTP/investigation metrics và Compose service)*
 
 ---
 

@@ -1,0 +1,3 @@
+# Minimal dependency set for the public Streamlit Community Cloud demo.
+streamlit>=1.57,<2
+pandas>=2.3,<3
